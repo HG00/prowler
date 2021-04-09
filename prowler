@@ -32,7 +32,7 @@ OPTRED="[1;31m"
 OPTNORMAL="[0;39m"
 
 # Set the defaults variables
-PROWLER_VERSION=2.3.0-22012021
+PROWLER_VERSION=2.4.0-07042021
 PROWLER_DIR=$(dirname "$0")
 
 REGION=""
@@ -296,7 +296,7 @@ get_regions() {
   # Get list of regions based on include/whoami
   REGIONS=$($AWSCLI ec2 describe-regions --query 'Regions[].RegionName' --output text $PROFILE_OPT --region $REGION_FOR_STS --region-names $FILTERREGION 2>&1)
   if [[ $(echo "$REGIONS" | grep 'AccessDenied\|UnauthorizedOperation') ]]; then
-    echo "Access Denied trying to describe regions"
+    echo "$OPTRED Access Denied trying to describe regions! Review permissions as described here: https://github.com/toniblyx/prowler/#requirements-and-installation $OPTNORMAL"
     EXITCODE=1
     exit $EXITCODE
   fi
@@ -342,11 +342,14 @@ show_group_title() {
 
 # Function to execute the check
 execute_check() {
+
   if [[ $ACCOUNT_TO_ASSUME ]]; then
-    MINIMUM_REMAINING_TIME_ALLOWED=$(($SESSION_DURATION_TO_ASSUME / 10 ))
+    # Following logic looks for time remaining in the session and review it 
+    # if it is less than 600 seconds, 10 minutes.
     CURRENT_TIMESTAMP=$(date -u "+%s")
-    SESSION_CUTOFF=$(($CURRENT_TIMESTAMP + $MINIMUM_REMAINING_TIME_ALLOWED))
-    if [[ $AWS_SESSION_EXPIRATION < $SESSION_CUTOFF ]]; then
+    SESSION_TIME_REMAINING=$(expr $AWS_SESSION_EXPIRATION - $CURRENT_TIMESTAMP)
+    MINIMUM_REMAINING_TIME_ALLOWED="600"
+    if [[ $MINIMUM_REMAINING_TIME_ALLOWED > $SESSION_TIME_REMAINING ]]; then
       unset AWS_ACCESS_KEY_ID
       unset AWS_SECRET_ACCESS_KEY
       unset AWS_SESSION_TOKEN
@@ -354,15 +357,24 @@ execute_check() {
     fi
   fi
 
+  CHECK_ID="$1" 
+
   # See if this is an alternate name for a check
   # for example, we might have been passed 1.01 which is another name for 1.1
   local alternate_name_var=CHECK_ALTERNATE_$1
   local alternate_name=${!alternate_name_var}
   # See if this check defines an ASFF Type, if so, use this, falling back to a sane default
-  # For a list of Types, see: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format.html#securityhub-findings-format-type-taxonomy
+  # For a list of Types Taxonomy, see: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format-type-taxonomy.html
   local asff_type_var=CHECK_ASFF_TYPE_$1
-  local asff_compliance_type_var=CHECK_ASFF_COMPLIANCE_TYPE_$1
+  CHECK_ASFF_TYPE="${!asff_type_var:-Software and Configuration Checks}"
 
+  local asff_compliance_type_var=CHECK_ASFF_COMPLIANCE_TYPE_$1
+  CHECK_ASFF_COMPLIANCE_TYPE="${!asff_compliance_type_var:-Software and Configuration Checks}"
+  
+  # See if this check defines an ASFF Resource Type, if so, use this, falling back to a sane default
+  # For a list of Resource Types, see: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format.html#asff-resources
+  local asff_resource_type_var=CHECK_ASFF_RESOURCE_TYPE_$1
+  CHECK_ASFF_RESOURCE_TYPE="${!asff_resource_type_var:-AwsAccount}"
 
   local severity_var=CHECK_SEVERITY_$1
   CHECK_SEVERITY="${!severity_var}"
@@ -370,15 +382,17 @@ execute_check() {
   local servicename_var=CHECK_SERVICENAME_$1
   CHECK_SERVICENAME="${!servicename_var}"
 
-  CHECK_ID="$1"
+  local risk_var=CHECK_RISK_$1
+  CHECK_RISK="${!risk_var}"
 
-  ASFF_TYPE="${!asff_type_var:-Software and Configuration Checks}"
-  ASFF_COMPLIANCE_TYPE="${!asff_compliance_type_var:-Software and Configuration Checks}"
-  # See if this check defines an ASFF Resource Type, if so, use this, falling back to a sane default
-  # For a list of Resource Types, see: https://docs.aws.amazon.com/securityhub/latest/userguide/securityhub-findings-format.html#asff-resources
-  local asff_resource_type_var=CHECK_ASFF_RESOURCE_TYPE_$1
+  local remediation_var=CHECK_REMEDIATION_$1
+  CHECK_REMEDIATION="${!remediation_var}"
 
-  ASFF_RESOURCE_TYPE="${!asff_resource_type_var:-AwsAccount}"
+  local doc_var=CHECK_DOC_$1
+  CHECK_DOC="${!doc_var}"
+
+  local caf_epic_var=CHECK_CAF_EPIC_$1
+  CHECK_CAF_EPIC="${!caf_epic_var}"
 
   SECURITYHUB_NEW_FINDINGS_IDS=()
 
